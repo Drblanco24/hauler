@@ -1,7 +1,0 @@
-bin/
-dist/
-store/
-work/
-coverage.out
-*.tar.zst
-.env
