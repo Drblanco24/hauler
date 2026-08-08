@@ -29,18 +29,39 @@ services:
       interval: 5s
       retries: 10
 
-  registry:
+  # Two registries: one standing in for "upstream", one for the destination.
+  # The e2e suite needs both, and keeping them local means the suite never
+  # reaches the internet -- the right property for a test of an airgap tool.
+  registry-upstream:
     image: registry:2
     ports: ["5001:5000"]
-    volumes: ["registrydata:/var/lib/registry"]
+    volumes: ["upstreamdata:/var/lib/registry"]
+
+  registry-dest:
+    image: registry:2
+    ports: ["5002:5000"]
+    volumes: ["destdata:/var/lib/registry"]
+
+  # Applies migrations, then exits. The worker waits on it.
+  migrate:
+    build: {context: .., dockerfile: Dockerfile}
+    command: ["migrate"]
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      HAULERWEB_DATABASE_URL: postgres://haulerweb:haulerweb@postgres:5432/haulerweb?sslmode=disable
 
   hauler-web:
     build:
       context: ..
       dockerfile: Dockerfile
+    # `worker` is the image default; named here so the compose file documents
+    # what this container actually does.
+    command: ["worker"]
     depends_on:
       postgres: {condition: service_healthy}
       minio:    {condition: service_healthy}
+      migrate:  {condition: service_completed_successfully}
     environment:
       HAULERWEB_DATABASE_URL: postgres://haulerweb:haulerweb@postgres:5432/haulerweb?sslmode=disable
       HAULERWEB_LOG_LEVEL: debug
@@ -53,6 +74,7 @@ services:
 volumes:
   pgdata:
   miniodata:
-  registrydata:
+  upstreamdata:
+  destdata:
   storedata:
   workdata:

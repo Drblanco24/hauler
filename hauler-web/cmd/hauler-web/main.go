@@ -2,8 +2,8 @@
 // and records what it moved.
 //
 // The subcommands present here are the ones that are actually implemented.
-// `serve`, `worker`, and `migrate` arrive with the database and web phases;
-// adding them as stubs now would make the CLI lie about what it can do.
+// `serve` arrives with the web phase; adding it as a stub now would make the
+// CLI -- and the container image's CMD -- lie about what it can do.
 package main
 
 import (
@@ -47,7 +47,7 @@ func newRootCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	cmd.AddCommand(newVersionCmd(), newPlanCmd())
+	cmd.AddCommand(newVersionCmd(), newPlanCmd(), newMigrateCmd(), newReconcileCmd(), newWorkerCmd())
 	return cmd
 }
 

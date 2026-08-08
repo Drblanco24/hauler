@@ -17,28 +17,50 @@ at which digest, or whether it ever reached the destination registry.
 
 ## Status
 
-Early. The reconciliation core is implemented and tested; the database, web UI,
-and Harbor integration are in progress.
+The headless reconciler works end to end: it pulls from upstream, pushes to a
+destination registry, and records every digest in Postgres, so a second run
+over unchanged inputs does nothing. That last property is verified mechanically
+(see *Verification* below), not by inspection.
+
+Not built yet: the web UI, OIDC and API tokens, S3 archives with retention, the
+job queue, the Helm chart, and the Harbor API integration.
 
 | Component | State |
 | --- | --- |
 | `internal/config` — env-first configuration | done |
-| `internal/manifest` — manifest parsing and scoping | done |
+| `internal/manifest` — parsing and scoping | done |
 | `internal/hauler` — hauler CLI wrapper | done |
 | `internal/planner` — desired-vs-observed diff | done |
 | `internal/registryclient` — digest resolution | done |
-| `migrations/` — Postgres schema | written, not yet wired |
-| `internal/db`, `gitsource`, `jobs`, `api`, `web`, `harbor` | not started |
+| `internal/db` + `migrations/` — Postgres schema and queries | done |
+| `internal/gitsource` — manifest repository checkout | done |
+| `internal/reconcile` — the loop that moves images | done |
+| `internal/storage`, `jobs`, `api`, `web`, `auth`, `harbor` | not started |
+| Helm chart | not started |
 
-`hauler-web plan` works today and needs no database.
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `plan` | Print what a reconcile would do. Changes nothing, needs no database. |
+| `migrate` | Apply the database schema. |
+| `reconcile` | One pass over every enabled source. Pulls, pushes, records. |
+| `worker` | The same, on a poll interval. This is what the container runs. |
+
+`serve` does not exist yet, which is why the image's `CMD` is `worker`.
 
 ## Try it
 
 ```bash
 make build
 
-# What would a reconcile do?
+# What would a reconcile do? Reads only; no database required.
 bin/hauler-web plan --manifests ./manifests --store ./store
+
+# Actually move things.
+export HAULERWEB_DATABASE_URL=postgres://haulerweb:haulerweb@localhost:5432/haulerweb?sslmode=disable
+bin/hauler-web migrate
+bin/hauler-web reconcile
 ```
 
 ```
@@ -91,16 +113,37 @@ at `--log-level disabled` and additionally extract the JSON object defensively.
 hauler is actually used for airgap transfer. A new archive is written only when
 the store's contents change — a push-only run does not produce one.
 
-## Development
+## Verification
+
+Three tiers, all of which run in CI on every push.
 
 ```bash
-make test               # unit tests: no database, network, or hauler binary
-make test-integration   # additionally requires a real hauler binary
+make test               # unit: no database, network, or hauler binary
+make test-integration   # + a real hauler binary and a real Postgres
+make test-e2e           # + the full reconcile loop against live registries
+```
 
-# The integration suite can seed a store from a haul archive so it needs no network:
+The e2e suite is the one that matters. It runs the real hauler binary against
+two in-process OCI registries and a real Postgres, and asserts:
+
+1. a first reconcile pulls the image and it appears in the destination registry;
+2. **a second reconcile over unchanged inputs pulls nothing** — the whole point
+   of the system, and a regression that would otherwise be invisible because a
+   redundant re-pull still reports success;
+3. moving a tag upstream causes exactly one re-pull;
+4. adding one image to a manifest pulls only that image;
+5. an unresolvable reference degrades the run to `partial` without blocking the
+   healthy images;
+6. a second worker refuses to write a store another already holds.
+
+It needs no Docker and no internet: go-containerregistry serves both registries
+over loopback, which hauler reaches without any insecure flag. That is the right
+property for a test of an airgap tool.
+
+```bash
+HAULERWEB_TEST_DATABASE_URL=postgres://...  \
 HAULERWEB_TEST_HAULER_BIN=/usr/local/bin/hauler \
-HAULERWEB_TEST_HAUL=/path/to/haul.tar.zst \
-  make test-integration
+  make test-e2e
 ```
 
 ## Configuration
@@ -111,7 +154,7 @@ rejected at startup rather than clamped.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `HAULERWEB_DATABASE_URL` | — | Postgres DSN (required once the DB lands) |
+| `HAULERWEB_DATABASE_URL` | — | Postgres DSN (required by `migrate`, `reconcile`, `worker`) |
 | `HAULERWEB_LISTEN_ADDR` | `:8080` | Web/API bind address |
 | `HAULERWEB_STORE_DIR` | `/var/lib/hauler-web/store` | Persistent hauler store |
 | `HAULERWEB_TEMP_DIR` | OS default | hauler `--tempdir`; archive scratch space |

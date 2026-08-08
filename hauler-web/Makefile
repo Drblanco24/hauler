@@ -41,11 +41,18 @@ lint:
 test:
 	go test $(GO_FILES) -cover -race -covermode=atomic -coverprofile=$(GO_COVERPROFILE)
 
-# Tests that shell out to a real hauler binary. Point HAULERWEB_TEST_HAUL at a
-# haul archive to also exercise store-info parsing over real content.
+# Tests that shell out to a real hauler binary and talk to a real Postgres.
+# Point HAULERWEB_TEST_HAUL at a haul archive to also exercise store-info
+# parsing over real content.
 .PHONY: test-integration
 test-integration:
-	go test -tags=integration -race $(GO_FILES)
+	go test -tags=integration -race -count=1 $(GO_FILES)
+
+# The acceptance gate: the full reconcile loop against live registries, a real
+# hauler binary, and a real Postgres. Needs no Docker and no internet.
+.PHONY: test-e2e
+test-e2e:
+	go test -tags=e2e -race -count=1 -v $(GO_FILES)
 
 .PHONY: cover
 cover: test

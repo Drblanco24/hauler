@@ -160,7 +160,7 @@ func Load() (*Config, error) {
 // Load. It is safe to call more than once.
 func (c *Config) Validate() error {
 	if c.DatabaseURL == "" {
-		return fmt.Errorf("database url is required (set %s or --database-url)", EnvDatabaseURL)
+		return fmt.Errorf("database url is required: set %s", EnvDatabaseURL)
 	}
 	if c.Concurrency < 1 {
 		return fmt.Errorf("concurrency must be at least 1, got %d", c.Concurrency)
