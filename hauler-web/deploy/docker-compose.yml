@@ -1,0 +1,58 @@
+# Local development stack. Kubernetes deployment uses the Helm chart instead.
+#
+# minio stands in for S3 and registry:2 for the destination registry, so the
+# whole pull -> push -> archive path is exercisable without external services.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: haulerweb
+      POSTGRES_PASSWORD: haulerweb
+      POSTGRES_DB: haulerweb
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U haulerweb"]
+      interval: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: haulerweb
+      MINIO_ROOT_PASSWORD: haulerweb123
+    ports: ["9000:9000", "9001:9001"]
+    volumes: ["miniodata:/data"]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      retries: 10
+
+  registry:
+    image: registry:2
+    ports: ["5001:5000"]
+    volumes: ["registrydata:/var/lib/registry"]
+
+  hauler-web:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    depends_on:
+      postgres: {condition: service_healthy}
+      minio:    {condition: service_healthy}
+    environment:
+      HAULERWEB_DATABASE_URL: postgres://haulerweb:haulerweb@postgres:5432/haulerweb?sslmode=disable
+      HAULERWEB_LOG_LEVEL: debug
+      HAULERWEB_POLL_INTERVAL: 1m
+    ports: ["8080:8080"]
+    volumes:
+      - storedata:/var/lib/hauler-web/store
+      - workdata:/var/lib/hauler-web/work
+
+volumes:
+  pgdata:
+  miniodata:
+  registrydata:
+  storedata:
+  workdata:
